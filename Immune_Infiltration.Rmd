@@ -1,0 +1,261 @@
+---
+title: "PPTC_immune_infiltration"
+author: "Yan Zhou"
+date: "2022-10-16"
+output: html_document
+---
+
+```{r import data}
+pacman::p_load(readxl, openxlsx, dplyr, ggplot2,                #Load One or More Packages
+               reshape2, magrittr, tidyverse, Hmisc,
+               ggupset, FactoMineR, limma,
+               factoextra, Rtsne,easyGgplot2,
+               pheatmap, vioplot, ggrepel,
+               ggpubr, ggsignif, ggridges,
+               RColorBrewer, randomcoloR,
+               gridExtra, ggplotify,reshape,
+               circlize, corrplot,VennDiagram)
+
+pinfo = read.csv("PPTC_Label.csv", row.names = 1)
+data = read.table("PPTC_Preprocessed_ProtMatrix.txt", header = T, row.names = 1)
+
+## 7 types with Treg (selected)
+frac_data = read.table("fractions_7types_Treg.txt",header = T, sep = "\t",)
+frac_data1 = frac_data[,1:8]
+
+
+```
+
+```{r Fig4A - boxplot - 7 types}
+df = melt(frac_data1,id = "Mixture")
+df$Mixture = factor(df$Mixture,levels = unique(df$Mixture))
+names(df) = c("Sample", "Cell_type", "Fractions")
+
+df$Cell_type = factor(df$Cell_type, levels = rev(c("NK.cells", "CD4.T.cells", "CD8.T.cells",
+                                               "B.cells", "Macrophages", "Dendritic.cells",
+                                               "Thyroid.cells")))
+
+## add group info
+df$Group = pinfo$Group[match(df$Sample,row.names(pinfo))]
+df$Group = factor(df$Group,levels = c("PB","PM","AM"))
+
+
+cells = unique(df$Cell_type)
+frac_data1$Group = pinfo$Group[match(frac_data1$Mixture,row.names(pinfo))]
+row.names(frac_data1) = frac_data1$Mixture
+frac_data1 = frac_data1[,-1]
+
+
+df_boxplot = frac_data1 
+
+df_boxplot$Group = factor(df_boxplot$Group, levels = c("PB", "PM", "AM"))
+
+my_comparisons <- list( c("PB", "PM"), c("PM", "AM"))
+
+
+## updated 2023.01.05 2 groups
+df_boxplot1 = df_boxplot[!df_boxplot$Group %in% "AM",]
+df_boxplot1$samples = row.names(df_boxplot1)
+# wide to long tables
+df_boxplot2 <- pivot_longer(df_boxplot1, cols=1:7, names_to = "Cells", values_to = "Proportions")
+
+df_boxplot2$Group = factor(df_boxplot2$Group, levels = c("PB", "PM"))
+
+summary = boxplot(Proportions~Cells:Group,data = df_boxplot2)
+boxplot_details = summary$stats %>% as.data.frame()
+colnames(boxplot_details) = summary$names
+rownames(boxplot_details) = c("Lower whisker","First Quartile","Median","Third Quartile","Upper whisker")
+
+write.xlsx(boxplot_details,"fig4a_details_20240226.xlsx",rowNames = T)
+write.xlsx(df_boxplot2,"fig4a.xlsx")
+
+
+
+pdf(fig4a,"boxplot_7types_Treg_2groups_20230105.pdf",width = 12,height = 6)
+fig4a = ggplot(df_boxplot2,
+       aes_(x = ~Cells,
+            y = ~Proportions,
+            col = ~Group
+            #add = "jitter"
+       )) +
+  #labs(x = Cells, y = "Proportions")+
+  #stat_compare_means(method = "t.test",  hide.ns = TRUE, size = 4)+ 
+  stat_compare_means(method = "t.test", hide.ns = TRUE)+
+  geom_boxplot(position=position_dodge(),lwd=1) +
+  geom_jitter(alpha = 0.5, position=position_jitterdodge(), size = 1.5)+
+  scale_color_manual(values=c("#0072B5FF", "#BC3C29FF"))+
+  guides(fill="none") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black",size=1),
+        axis.text = element_text(size = 12,
+                                 color = "black"),
+        axis.text.x = element_text(size = 12,hjust = 0.9),
+        axis.title = element_text(size = 12),
+        axis.text.y = element_text(size = 12,),
+        plot.title = element_text(hjust=0.5,size = 12),
+        # legend.position = "none"
+        # legend.title = element_text(size = 14)
+        # legend.text = element_text(size = 22)
+  )
+dev.off()
+
+
+
+## updated 2023.09.10   -- wilcox test
+pdf( "boxplot_7types_Treg_2groups_wilcox_20230910.pdf",width = 12,height = 6)
+ggplot(df_boxplot2,
+       aes_(x = ~Cells,
+            y = ~Proportions,
+            col = ~Group
+            #add = "jitter"
+       )) +
+  #labs(x = Cells, y = "Proportions")+
+  #stat_compare_means(method = "t.test",  hide.ns = TRUE, size = 4)+ 
+  stat_compare_means(method = "wilcox.test", hide.ns = TRUE)+
+  geom_boxplot(position=position_dodge(),lwd=1) +
+  geom_jitter(alpha = 0.5, position=position_jitterdodge(), size = 1.5)+
+  scale_color_manual(values=c("#0072B5FF", "#BC3C29FF"))+
+  guides(fill="none") +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black",size=1),
+        axis.text = element_text(size = 12,
+                                 color = "black"),
+        axis.text.x = element_text(size = 12,hjust = 0.9),
+        axis.title = element_text(size = 12),
+        axis.text.y = element_text(size = 12,),
+        plot.title = element_text(hjust=0.5,size = 12),
+        # legend.position = "none"
+        # legend.title = element_text(size = 14)
+        # legend.text = element_text(size = 22)
+  )
+dev.off()
+
+a = list()
+n = 1
+## normality test
+for (i in c("PB","PM")) {
+  for (j in unique(df_boxplot2$Cells)) {
+    a[[n]] = shapiro.test(df_boxplot2$Proportions[(df_boxplot2$Group == i & df_boxplot2$Cells == j)])
+    names(a)[n] = paste0(i,"_",j)
+    n = n+1
+  }
+}
+
+results = data.frame()
+for (i in 1:14) {
+  results[i,1] = names(a)[i]
+  results[i,2] = a[[i]][["p.value"]]
+  results[i,3] = ifelse(results[i,2] < 0.05, "TRUE", "FALSE")
+}
+
+
+write.xlsx(results, "shapiro_test_results_20230910.xlsx", )
+  
+  
+```
+
+
+
+```{r sFig2:correlation heatmap - PM high/low risk 20230106}
+df_frac_PM = df_boxplot[grepl("PM",df_boxplot$Group),]
+
+order = c("Q8TBF5", "P10645","P12111","Q08495",
+          "Q99972", "L0R819","O00584","Q86Y22",
+          "P13612","Q96RP7","Q4G0X9","Q96JY6",
+          "P23378","Q9BXJ5","P17931","Q96F24",
+          "Q9Y4Z0","Q9NQ79","Q96AN5")
+
+data_19prot = data[match(order,row.names(data)),]
+
+data_PM = data_19prot[,row.names(df_frac_PM)]
+
+gene_name = read.table("gene_name.tsv",header = T,sep = "\t",quote = "")
+gene_name = gene_name[,c(1,2)]
+
+gene_name$combine = paste0(gene_name$Entry,"_",gene_name$Gene)
+row.names(data_PM) = gene_name$combine[match(row.names(data_PM),gene_name$Entry)]
+
+df_frac_PM = t(df_frac_PM[,1:7]) %>% data.frame()
+
+df_PM = rbind(data_PM,df_frac_PM)
+
+## import high/low risk group
+pinfo_high = read.csv("PM_HighRisk.csv",row.names = 1)
+pinfo_low = read.csv("PM_LowRisk.csv",row.names = 1)
+
+pinfo_high = row.names(pinfo_high)
+pinfo_low = row.names(pinfo_low)
+
+df_PM_high = df_PM[,pinfo_high]
+df_PM_low = df_PM[,pinfo_low]
+
+PM_high = rcorr(t(df_PM_high))
+PM_low = rcorr(t(df_PM_low))
+
+
+r_PM_h = PM_high$r[1:19, 20:26]
+p_PM_h = PM_high$P[1:19, 20:26] 
+
+# write.xlsx(r_PM_h,"PM_high_r.xlsx",rowNames = T)
+# write.xlsx(p_PM_h,"PM_high_p.xlsx",rowNames = T)
+
+pdf("PPTC_PM_high_corrplot_20230109.pdf", width = 10, height = 10)   
+corrplot(r_PM_h,   
+         #PM0$r[1:19, 20:26], 
+         p.mat = p_PM_h,   
+         #p.mat=PM0$P[1:19, 20:26], 
+         is.corr = F,
+         method="color", 
+         tl.col = "black",
+         tl.cex=1,        ## annotation
+         cl.cex = 1,      ## color legend
+         col=colorRampPalette(c("dark blue","white","dark red"))(100),
+         col.lim = c(-1, 1),
+         cl.align.text = 'l',
+         number.cex = 1,  ## r
+         sig.level = c(0.001, 0.01, 0.05), 
+         insig = 'label_sig',
+         pch.cex = 1,     ## asterisk
+         addCoef.col = "black",
+         #tl.pos="n",
+         outline=TRUE)
+dev.off()
+
+
+r_PM_l = PM_low$r[1:19, 20:26] %>% as.data.frame()
+p_PM_l = PM_low$P[1:19, 20:26] %>% as.data.frame()
+
+write.xlsx(r_PM_l,"PM_low_r.xlsx",rowNames = T)
+write.xlsx(p_PM_l,"PM_low_p.xlsx",rowNames = T)
+
+pdf("PPTC_PM_low_corrplot_20230109.pdf", width = 10, height = 10)   
+corrplot(r_PM_l,   
+         #PM0$r[1:19, 20:26], 
+         p.mat = p_PM_l,   
+         #p.mat=PM0$P[1:19, 20:26], 
+         is.corr = F,
+         method="color", 
+         tl.col = "black",
+         tl.cex=1,        ## annotation
+         cl.cex = 1,      ## color legend
+         col=colorRampPalette(c("dark blue","white","dark red"))(100),
+         col.lim = c(-1, 1),
+         cl.align.text = 'l',
+         number.cex = 1,  ## r
+         sig.level = c(0.001, 0.01, 0.05), 
+         insig = 'label_sig',
+         pch.cex = 1,     ## asterisk
+         addCoef.col = "black",
+         #tl.pos="n",
+         outline=TRUE)
+dev.off()
+
+
+
+```
+
+

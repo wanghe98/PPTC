@@ -1,0 +1,355 @@
+---
+title: "correlation_with_clinical"
+author: "Yan Zhou"
+date: "2022-11-07"
+output: html_document
+---
+
+```{r import data}
+pacman::p_load(readxl, openxlsx, dplyr, ggplot2,                #Load One or More Packages
+               reshape2, magrittr, tidyverse, Hmisc,
+               ggupset, FactoMineR, limma,
+               factoextra, Rtsne,easyGgplot2,
+               pheatmap, vioplot, ggrepel,
+               ggpubr, ggsignif, ggridges,
+               RColorBrewer, randomcoloR,
+               gridExtra, ggplotify,reshape,
+               circlize, corrplot,VennDiagram)
+
+pinfo = read.csv("PPTC_Label.csv", row.names = 1)
+
+
+## 7 types with Treg
+frac_data = read.table("fractions_7types_Treg.txt",header = T, sep = "\t",)
+frac_data1 = frac_data[,1:8]
+
+df = melt(frac_data1,id = "Mixture")
+df$Mixture = factor(df$Mixture,levels = unique(df$Mixture))
+
+names(df) = c("Sample", "Cell_type", "Fractions")
+
+df$Cell_type = factor(df$Cell_type, levels = rev(c("NK.cells", "Treg.cells","CD4.T.cells", "CD8.T.cells",
+                                               "B.cells", "Macrophages", "Dendritic.cells")))
+df$Group = pinfo$Group[match(df$Sample,row.names(pinfo))]
+df$Group = factor(df$Group,levels = c("PB","PM","AM"))
+
+
+cells = unique(df$Cell_type)
+frac_data1$Group = pinfo$Group[match(frac_data1$Mixture,row.names(pinfo))]
+row.names(frac_data1) = frac_data1$Mixture
+frac_data1 = frac_data1[,-1]
+
+data = read.table("PPTC_Preprocessed_ProtMatrix.txt", header = T, row.names = 1)
+
+
+```
+
+
+```{r spearman correlations}
+### PM patients
+# if available clinical factors correlates with cell fractions
+
+#cells = unique(df$Cell_type)
+frac_data1$Group = pinfo$Group[match(frac_data1$Mixture,row.names(pinfo))]
+row.names(frac_data1) = frac_data1$Mixture
+frac_data1 = frac_data1[,-1]
+
+pinfo_PM = pinfo[pinfo$Group == "PM",]
+
+frac_data1_PM = frac_data1[frac_data1$Group == "PM",]
+frac_data1_PM = cbind(frac_data1_PM,pinfo_PM[,5:16])
+frac_data1_PM = frac_data1_PM[,-8]
+# Male: 1, Female: 2
+frac_data1_PM$Gender = factor(frac_data1_PM$Gender, levels = c("Male","Female"), labels = c(1,2))
+
+frac_data1_PM[] <- lapply(frac_data1_PM, as.numeric)
+
+PM_cor = rcorr(as.matrix(frac_data1_PM), type = "spearman")
+
+PM_cor_r = PM_cor$r[1:7, 8:19]
+PM_cor_P = PM_cor$P[1:7, 8:19]
+
+```
+
+```{r immune check list}
+imm_chck_lst = read.xlsx("immune_check_point.xlsx")
+imm_chck_lst$label = paste0(imm_chck_lst$From, "_", imm_chck_lst$Entry)
+
+data_imm = data[row.names(data) %in% imm_chck_lst$Entry,]
+row.names(data_imm) = imm_chck_lst$label[match(row.names(data_imm),imm_chck_lst$Entry)]
+
+## boxplot
+df_box = t(data_imm) %>% as.data.frame() 
+df_box$Group = pinfo$Group[match(row.names(df_box), row.names(pinfo))]
+
+df_box_PM = df_box[df_box$Group == "PM",]
+df_box_PM$Recur = pinfo$Recurrence[match(row.names(df_box_PM), row.names(pinfo))]
+
+df_box$Group = factor(df_box$Group, levels = c("PB", "PM", "AM"))
+df_box_PM$Recur = factor(df_box_PM$Recur, levels = c(0,1))
+
+my_comparisons <- list( c("PB", "PM"), c("PM", "AM"))
+
+
+```
+
+
+```{r immune check list -- PB PM 20230105}
+imm_chck_lst = read.xlsx("immune_check_point.xlsx")
+imm_chck_lst$label = paste0(imm_chck_lst$From, "_", imm_chck_lst$Entry)
+
+data_imm = data[row.names(data) %in% imm_chck_lst$Entry,]
+row.names(data_imm) = imm_chck_lst$label[match(row.names(data_imm),imm_chck_lst$Entry)]
+
+## boxplot
+df_box = t(data_imm) %>% as.data.frame() 
+df_box$Group = pinfo$Group[match(row.names(df_box), row.names(pinfo))]
+
+df_box_PM = df_box[df_box$Group == "PM",]
+df_box_PM$Recur = pinfo$Recurrence[match(row.names(df_box_PM), row.names(pinfo))]
+
+# df_box_PM$Recur = factor(df_box_PM$Recur, levels = c(0,1))
+
+df_box = df_box[!df_box$Group == "AM",]
+
+nm = row.names(df_box)[df_box$Group == "PM"] 
+
+my_comparisons <- list( c("PB", "NR"), c("NR", "R"))
+
+for (i in nm) {
+  df_box$Group[row.names(df_box) %in% i] = pinfo$Recurrence[match(i,row.names(pinfo))]
+}
+
+df_box$Group = factor(df_box$Group, levels = c("PB", "0", "1"), labels = c("PB", "NR", "R"))
+
+
+
+```
+
+```{r immune check list -- 3 proteins}
+### remove outliers
+##PVR
+df_PVR = df_box[,c("PVR_P15151","Group")]
+o1 = (fivenum(unlist(df_PVR[,1]))[4]-fivenum(unlist(df_PVR[,1]))[2])*2+fivenum(unlist(df_PVR[,1]))[4]
+o2 = fivenum(unlist(df_PVR[,1]))[2]-(fivenum(unlist(df_PVR[,1]))[4]-fivenum(unlist(df_PVR[,1]))[2])*2
+df1_PVR = df_PVR[(df_PVR[,1] < o1),] 
+df1_PVR = df1_PVR[(df1_PVR[,1] > o2),]
+
+
+## IL10RB
+df_IL10RB = df_box[,c("IL10RB_Q08334","Group")]
+o1 = (fivenum(unlist(df_IL10RB[,1]))[4]-fivenum(unlist(df_IL10RB[,1]))[2])*2+fivenum(unlist(df_IL10RB[,1]))[4]
+o2 = fivenum(unlist(df_IL10RB[,1]))[2]-(fivenum(unlist(df_IL10RB[,1]))[4]-fivenum(unlist(df_IL10RB[,1]))[2])*2
+df1_IL10RB = df_IL10RB[(df_IL10RB[,1] < o1),] 
+df1_IL10RB = df1_IL10RB[(df1_IL10RB[,1] > o2),]
+
+
+summary = boxplot(PVR_P15151~Group,data = df1_PVR)
+boxplot_details = summary$stats %>% as.data.frame()
+colnames(boxplot_details) = summary$names
+rownames(boxplot_details) = c("Lower whisker","First Quartile","Median","Third Quartile","Upper whisker")
+
+write.xlsx(boxplot_details,"fig4c_PVR_details_20240226.xlsx",rowNames = T)
+
+
+summary = boxplot(IL10RB_Q08334~Group,data = df1_IL10RB)
+boxplot_details = summary$stats %>% as.data.frame()
+colnames(boxplot_details) = summary$names
+rownames(boxplot_details) = c("Lower whisker","First Quartile","Median","Third Quartile","Upper whisker")
+
+write.xlsx(boxplot_details,"fig4c_IL10RB_details_20240226.xlsx",rowNames = T)
+
+
+
+pdf("boxplot_PVR_20230106.pdf",width = 6,height = 6)
+ggplot(df1_PVR,
+       aes_(x = ~Group,
+            y = ~PVR_P15151,
+            col = ~Group
+            #add = "jitter"
+       )) +
+  labs(x = "PVR_P15151", y = "Log2(protein abundances)")+
+  #stat_compare_means(method = "t.test",  hide.ns = TRUE, size = 4)+ 
+  stat_compare_means(comparisons = my_comparisons, method = "t.test", hide.ns = TRUE)+
+  geom_boxplot(position=position_dodge(),lwd=1) +
+  geom_jitter(alpha = 0.5, position=position_jitter(0.2), size = 1)+
+  scale_color_manual(values=c("#0072B5FF", "#794288","#E18727FF"))+
+  guides(fill=FALSE) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black",size=1),
+        axis.text = element_text(size = 8,
+                                 color = "black"),
+        axis.text.x = element_text(size = 8,hjust = 0.9),
+        axis.title = element_text(size = 8),
+        axis.text.y = element_text(size = 8,),
+        plot.title = element_text(hjust=0.5,size = 8),
+        legend.position = "none"
+        # legend.title = element_text(size = 14)
+        # legend.text = element_text(size = 22)
+  )
+dev.off()
+
+
+
+pdf("boxplot_IL10RB_20230106.pdf",width = 6,height = 6)
+ggplot(df1_IL10RB,
+       aes_(x = ~Group,
+            y = ~IL10RB_Q08334,
+            col = ~Group
+            #add = "jitter"
+       )) +
+  labs(x = "IL10RB_Q08334", y = "Log2(protein abundances)")+
+  #stat_compare_means(method = "t.test",  hide.ns = TRUE, size = 4)+ 
+  stat_compare_means(comparisons = my_comparisons, method = "t.test", hide.ns = TRUE)+
+  geom_boxplot(position=position_dodge(),lwd=1) +
+  geom_jitter(alpha = 0.5, position=position_jitter(0.2), size = 1)+
+  scale_color_manual(values=c("#0072B5FF", "#794288","#E18727FF"))+
+  guides(fill=FALSE) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black",size=1),
+        axis.text = element_text(size = 8,
+                                 color = "black"),
+        axis.text.x = element_text(size = 8,hjust = 0.9),
+        axis.title = element_text(size = 8),
+        axis.text.y = element_text(size = 8,),
+        plot.title = element_text(hjust=0.5,size = 8),
+        legend.position = "none"
+        # legend.title = element_text(size = 14)
+        # legend.text = element_text(size = 22)
+  )
+dev.off()
+
+```
+
+
+```{r correlation with risk group}
+pinfo_high = read.csv("PM_HighRisk.csv",row.names = 1)
+pinfo_low = read.csv("PM_LowRisk.csv",row.names = 1)
+
+pinfo_high = row.names(pinfo_high)
+pinfo_low = row.names(pinfo_low)
+
+
+## boxplot
+
+df_box_PM$risk = "high"
+df_box_PM$risk[row.names(df_box_PM) %in% pinfo_low] = "low"
+df_box_PM$risk = factor(df_box_PM$risk, levels = c("low", "high"))
+
+
+##risk group
+pl = list()
+n = 1
+for (i in 1:31) {
+  max_n = df_box_PM[,i] %>%
+    na.omit() %>%
+    max()
+  gene = names(df_box_PM)[i]
+  pl[[n]] = ggplot(df_box_PM,
+                   aes_(x = ~risk,
+                        y = as.formula(paste0("~",gene)),
+                        col = ~risk
+                        #add = "jitter"
+                   )) +
+    labs(x = names(df_box_PM)[i], y = "Log2(protein abundances)")+
+    #stat_compare_means(method = "t.test",  hide.ns = TRUE, size = 4)+ 
+    stat_compare_means(method = "t.test", hide.ns = TRUE)+
+    geom_boxplot(position=position_dodge(),lwd=1) +
+    geom_jitter(alpha = 0.5, position=position_jitter(0.2), size = 1)+
+    scale_color_manual(values=c("#1B9E77", "#D95F02","#66B2FF"))+
+    guides(fill=FALSE) +
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          axis.line = element_line(colour = "black",size=1),
+          axis.text = element_text(size = 8,
+                                   color = "black"),
+          axis.text.x = element_text(size = 8,hjust = 0.9),
+          axis.title = element_text(size = 8),
+          axis.text.y = element_text(size = 8,),
+          plot.title = element_text(hjust=0.5,size = 8),
+          legend.position = "none"
+          # legend.title = element_text(size = 14)
+          # legend.text = element_text(size = 22)
+    )
+  n = n + 1
+}
+
+pdf( "boxplot_riskgroup_20221108.pdf",width = 20,height = 22)
+ggplot2.multiplot(plotlist = pl, cols = 6)
+dev.off()
+
+
+
+
+
+
+
+
+
+```
+
+
+```{r correlation with risk group - 3 groups 20230106}
+pinfo_high = read.csv("PM_HighRisk.csv",row.names = 1)
+pinfo_low = read.csv("PM_LowRisk.csv",row.names = 1)
+
+pinfo_high = row.names(pinfo_high)
+pinfo_low = row.names(pinfo_low)
+
+
+## boxplot
+df_box1 = df_box
+df_box1$Group = as.character(df_box1$Group)
+df_box1$Group[row.names(df_box1) %in% pinfo_low] = "Low risk"
+df_box1$Group[row.names(df_box1) %in% pinfo_high] = "High risk"
+df_box1$Group = factor(df_box1$Group, levels = c("PB","Low risk", "High risk"))
+
+my_comparisons <- list( c("PB", "Low risk"), c("Low risk", "High risk"))
+
+### remove outliers
+## IL10RB
+df_IL10RB = df_box1[,c("IL10RB_Q08334","Group")]
+o1 = (fivenum(unlist(df_IL10RB[,1]))[4]-fivenum(unlist(df_IL10RB[,1]))[2])*2+fivenum(unlist(df_IL10RB[,1]))[4]
+o2 = fivenum(unlist(df_IL10RB[,1]))[2]-(fivenum(unlist(df_IL10RB[,1]))[4]-fivenum(unlist(df_IL10RB[,1]))[2])*2
+df1_IL10RB = df_IL10RB[(df_IL10RB[,1] < o1),] 
+df1_IL10RB = df1_IL10RB[(df1_IL10RB[,1] > o2),]
+
+
+
+
+pdf("boxplot_risk_IL10RB_20230106.pdf",width = 6,height = 6)
+ggplot(df1_IL10RB,
+       aes_(x = ~Group,
+            y = ~IL10RB_Q08334,
+            col = ~Group
+            #add = "jitter"
+       )) +
+  labs(x = "IL10RB_Q08334", y = "Log2(protein abundances)")+
+  #stat_compare_means(method = "t.test",  hide.ns = TRUE, size = 4)+ 
+  stat_compare_means(comparisons = my_comparisons, method = "t.test", hide.ns = TRUE)+
+  geom_boxplot(position=position_dodge(),lwd=1) +
+  geom_jitter(alpha = 0.5, position=position_jitter(0.2), size = 1)+
+  scale_color_manual(values=c("#0072B5FF", "#794288","#E18727FF"))+
+  guides(fill=FALSE) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black",size=1),
+        axis.text = element_text(size = 8,
+                                 color = "black"),
+        axis.text.x = element_text(size = 8,hjust = 0.9),
+        axis.title = element_text(size = 8),
+        axis.text.y = element_text(size = 8,),
+        plot.title = element_text(hjust=0.5,size = 8),
+        legend.position = "none"
+        # legend.title = element_text(size = 14)
+        # legend.text = element_text(size = 22)
+  )
+dev.off()
+
+```
